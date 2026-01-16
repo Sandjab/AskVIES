@@ -169,10 +169,6 @@ Exemple : SIREN `380129866` → TVA `FR38380129866`
 
 **Jean-Paul Gavini** ([@Sandjab](https://github.com/Sandjab)) - Janvier 2026
 
-## Licence
-
-Ce projet est fourni sans licence spécifique. Utilisation à vos propres risques.
-
 ## Contribuer
 
 Les contributions sont les bienvenues. Merci de créer une issue ou une pull request pour toute suggestion d'amélioration.
