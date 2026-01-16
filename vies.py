@@ -52,7 +52,7 @@ import requests
 
 # Valeurs par défaut pour les options CLI
 DEFAULT_WORKERS = 10          # Nombre de threads concurrents
-DEFAULT_RATE_LIMIT = 25       # Requêtes par minute maximum
+DEFAULT_RATE_LIMIT = 120      # Requêtes par minute maximum
 DEFAULT_TIMEOUT = 90          # Timeout HTTP en secondes
 DEFAULT_MAX_RETRIES = 50      # Nombre max de tentatives par SIREN
 DEFAULT_LOG_FILE = "default.log"  # Fichier de log par défaut

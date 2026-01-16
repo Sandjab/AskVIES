@@ -83,7 +83,7 @@ python vies.py sirens.txt --no-proxy
 | `FILE` | (requis) | Fichier d'entrée |
 | `-o, --output` | `<input>.out` | Fichier de sortie |
 | `-w, --workers` | 10 | Threads concurrents |
-| `-r, --rate-limit` | 25 | Requêtes/minute |
+| `-r, --rate-limit` | 120 | Requêtes/minute |
 | `--log` | `default.log` | Fichier de log |
 | `--dry-run` | - | Mode simulation |
 | `-v, --verbose` | - | Mode verbeux |
