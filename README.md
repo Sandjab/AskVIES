@@ -10,8 +10,8 @@ Ce projet permet de vérifier si des entreprises françaises, identifiées par l
 
 - **Conversion SIREN → TVA** : Calcul automatique du numéro de TVA intracommunautaire français à partir d'un SIREN
 - **Validation en masse** : Traitement parallèle de fichiers contenant plusieurs numéros SIREN
-- **Gestion robuste des erreurs** : Mécanisme de retry avec backoff exponentiel
-- **Rate limiting** : Limitation configurable des requêtes par minute (défaut: 120 req/min)
+- **Gestion robuste des erreurs** : Mécanisme de retry avec backoff exponentiel configurable
+- **Rate limiting** : Limitation configurable des requêtes par minute (défaut: 300 req/min, 0 pour désactiver)
 - **Interface CLI complète** : Options configurables via ligne de commande
 - **Mode dry-run** : Vérification des TVA calculés sans appeler l'API
 - **Support proxy** : Configuration proxy pour environnements d'entreprise
@@ -55,6 +55,7 @@ python vies.py sirens.txt
 ```
 usage: vies [-h] [-o FILE] [-w N] [-r N] [--log FILE] [--dry-run] [-v] [-q]
             [--no-proxy] [--timeout N] [--max-retries N]
+            [--initial-delay SEC] [--backoff-multiplier N] [--max-delay SEC]
             FILE
 
 positional arguments:
@@ -65,7 +66,7 @@ options:
   -o FILE, --output FILE
                         Fichier de sortie CSV (défaut: <input>.out)
   -w N, --workers N     Nombre de threads concurrents (défaut: 10)
-  -r N, --rate-limit N  Limite de requêtes par minute (défaut: 120)
+  -r N, --rate-limit N  Limite de requêtes par minute (défaut: 300, 0 = désactivé)
   --log FILE            Fichier de log (défaut: default.log)
   --dry-run             Affiche les TVA calculés sans appeler l'API
   -v, --verbose         Mode verbeux (affiche plus de détails)
@@ -73,6 +74,10 @@ options:
   --no-proxy            Désactive le proxy
   --timeout N           Timeout des requêtes HTTP en secondes (défaut: 90)
   --max-retries N       Nombre maximum de tentatives par SIREN (défaut: 50)
+  --initial-delay SEC   Délai initial pour le backoff en secondes (défaut: 0.2)
+  --backoff-multiplier N
+                        Multiplicateur de backoff exponentiel (défaut: 1.5)
+  --max-delay SEC       Délai maximum pour le backoff en secondes (défaut: 30)
 ```
 
 ### Exemples

@@ -25,14 +25,16 @@ VIES/
 
 ### Organisation du code
 
-1. **Imports et configuration** (lignes 1-75)
-   - Constantes par défaut : `DEFAULT_WORKERS`, `DEFAULT_TIMEOUT`, etc.
+1. **Imports et configuration** (lignes 1-80)
+   - Constantes par défaut : `DEFAULT_WORKERS`, `DEFAULT_TIMEOUT`, `DEFAULT_RATE_LIMIT`, etc.
+   - Constantes de backoff : `THROTTLE_INITIAL_DELAY`, `THROTTLE_MULTIPLIER`, etc.
    - Configuration globale via dictionnaire `config`
-   - Classe `RateLimiter` : limitation thread-safe des requêtes/minute
+   - Classe `RateLimiter` : limitation thread-safe des requêtes/minute (sleep hors lock pour performance)
    - `_rate_limited_request()` : wrapper HTTP avec rate limiting
 
-2. **Fonctions utilitaires** (lignes 222-358)
+2. **Fonctions utilitaires** (lignes 240-380)
    - `get_proxies()` : Configuration proxy dynamique
+   - `get_proxies_cached()` : Version mise en cache pour performance
    - `log()` : Journalisation avec horodatage
    - `out()` : Écriture des résultats CSV
    - `verbose_print()` : Affichage conditionnel en mode verbose
@@ -83,7 +85,7 @@ python vies.py sirens.txt --no-proxy
 | `FILE` | (requis) | Fichier d'entrée |
 | `-o, --output` | `<input>.out` | Fichier de sortie |
 | `-w, --workers` | 10 | Threads concurrents |
-| `-r, --rate-limit` | 120 | Requêtes/minute |
+| `-r, --rate-limit` | 300 | Requêtes/minute (0 = désactivé) |
 | `--log` | `default.log` | Fichier de log |
 | `--dry-run` | - | Mode simulation |
 | `-v, --verbose` | - | Mode verbeux |
@@ -91,6 +93,9 @@ python vies.py sirens.txt --no-proxy
 | `--no-proxy` | - | Désactive le proxy |
 | `--timeout` | 90 | Timeout HTTP (s) |
 | `--max-retries` | 50 | Tentatives max |
+| `--initial-delay` | 0.2 | Délai initial backoff (s) |
+| `--backoff-multiplier` | 1.5 | Multiplicateur backoff |
+| `--max-delay` | 30 | Délai max backoff (s) |
 
 ## Conventions de code
 
@@ -120,6 +125,7 @@ python vies.py sirens.txt --no-proxy
 
 - [x] ~~Ajouter des arguments CLI (argparse)~~
 - [x] ~~Rendre le proxy configurable sans variables d'environnement~~
+- [x] ~~Optimiser les performances (rate limiter, backoff, cache proxy)~~
 - [ ] Supporter d'autres pays que la France
 - [ ] Ajouter des tests unitaires
 
@@ -151,3 +157,6 @@ cat test.txt.out
 - Les threads permettent le traitement parallèle
 - Mode `--dry-run` utile pour valider les entrées sans appel réseau
 - Rate limiting thread-safe via classe `RateLimiter` (configurable via `-r`)
+- Le rate limiter fait le sleep hors du lock pour permettre le parallélisme
+- Proxy configuration mise en cache via `get_proxies_cached()` pour performance
+- Backoff configurable via CLI (`--initial-delay`, `--backoff-multiplier`, `--max-delay`)

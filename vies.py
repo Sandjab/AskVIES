@@ -52,16 +52,17 @@ import requests
 
 # Valeurs par défaut pour les options CLI
 DEFAULT_WORKERS = 10          # Nombre de threads concurrents
-DEFAULT_RATE_LIMIT = 120      # Requêtes par minute maximum
+DEFAULT_RATE_LIMIT = 300      # Requêtes par minute maximum (0 = désactivé)
 DEFAULT_TIMEOUT = 90          # Timeout HTTP en secondes
 DEFAULT_MAX_RETRIES = 50      # Nombre max de tentatives par SIREN
 DEFAULT_LOG_FILE = "default.log"  # Fichier de log par défaut
 
 # Configuration du throttling (backoff exponentiel avec jitter)
-THROTTLE_INITIAL_DELAY = 1.0  # Délai initial en secondes
-THROTTLE_MAX_DELAY = 60.0     # Délai maximum en secondes
-THROTTLE_MULTIPLIER = 2.0     # Facteur multiplicatif (doubler à chaque retry)
-THROTTLE_JITTER = 0.5         # Facteur de jitter (±50% du délai calculé)
+# Valeurs optimisées pour un bon équilibre entre performance et robustesse
+THROTTLE_INITIAL_DELAY = 0.2  # Délai initial en secondes (réduit pour récupération rapide)
+THROTTLE_MAX_DELAY = 30.0     # Délai maximum en secondes
+THROTTLE_MULTIPLIER = 1.5     # Facteur multiplicatif (progression modérée)
+THROTTLE_JITTER = 0.3         # Facteur de jitter (±30% du délai calculé)
 
 # Configuration globale du script (mise à jour par les arguments CLI)
 # Cette approche permet aux fonctions d'accéder à la config sans la passer en paramètre
@@ -72,6 +73,10 @@ config = {
     "timeout": DEFAULT_TIMEOUT,
     "max_retries": DEFAULT_MAX_RETRIES,
     "rate_limit": DEFAULT_RATE_LIMIT,
+    # Configuration du backoff (paramétrable via CLI)
+    "initial_delay": THROTTLE_INITIAL_DELAY,
+    "backoff_multiplier": THROTTLE_MULTIPLIER,
+    "max_delay": THROTTLE_MAX_DELAY,
 }
 
 
@@ -109,11 +114,16 @@ class RateLimiter:
 
         Args:
             calls_per_minute (int): Nombre maximum de requêtes autorisées par minute.
-                                   Doit être > 0. Exemple: 120 signifie max 120 req/min,
-                                   soit un intervalle minimum de 0.5 secondes entre appels.
+                                   Valeur <= 0 désactive le rate limiting.
+                                   Exemple: 300 signifie max 300 req/min,
+                                   soit un intervalle minimum de 0.2 secondes entre appels.
         """
         self.calls_per_minute = calls_per_minute
-        self.min_interval = 60.0 / calls_per_minute  # Ex: 60/120 = 0.5 secondes
+        # Désactiver le rate limiting si calls_per_minute <= 0
+        if calls_per_minute <= 0:
+            self.min_interval = 0.0
+        else:
+            self.min_interval = 60.0 / calls_per_minute  # Ex: 60/300 = 0.2 secondes
         self.last_call = 0.0  # Timestamp du dernier appel (0 = jamais appelé)
         self.lock = threading.Lock()  # Verrou pour thread-safety
 
@@ -121,28 +131,44 @@ class RateLimiter:
         """
         Attend si nécessaire pour respecter la limite de débit.
 
-        Cette méthode est thread-safe. Elle calcule le temps écoulé depuis
-        le dernier appel et attend si l'intervalle minimum n'est pas atteint.
+        Cette méthode est thread-safe. Elle réserve un "slot" de temps pour
+        la requête courante, puis attend hors du lock pour permettre aux
+        autres threads de réserver leurs propres slots en parallèle.
 
-        Note:
-            Le sleep se fait à l'intérieur du lock, ce qui sérialise les appels.
-            C'est intentionnel pour garantir le respect du rate limit global.
+        Algorithme:
+            1. Acquiert le lock
+            2. Calcule quand ce thread peut faire sa requête
+            3. Réserve ce slot en mettant à jour last_call
+            4. Libère le lock
+            5. Attend si nécessaire (hors du lock)
+
+        Cela permet à plusieurs threads de réserver des slots simultanément
+        au lieu de s'attendre mutuellement, améliorant significativement
+        les performances en multi-thread.
         """
+        # Si rate limiting désactivé, retourner immédiatement
+        if self.min_interval == 0:
+            return
+
         with self.lock:
             now = time.time()
-            elapsed = now - self.last_call
+            # Calculer quand ce thread peut faire sa requête
+            next_allowed = self.last_call + self.min_interval
+            sleep_time = max(0, next_allowed - now)
+            # Réserver le slot pour ce thread (avant de libérer le lock)
+            self.last_call = now + sleep_time
 
-            # Si on appelle trop vite, attendre le temps restant
-            if elapsed < self.min_interval:
-                sleep_time = self.min_interval - elapsed
-                time.sleep(sleep_time)
-
-            # Mettre à jour le timestamp du dernier appel
-            self.last_call = time.time()
+        # Attendre hors du lock - permet aux autres threads de réserver
+        if sleep_time > 0:
+            time.sleep(sleep_time)
 
 
 # Instance globale du rate limiter, initialisée dans main()
 rate_limiter = None
+
+# Cache pour la configuration proxy (évite de recalculer pour chaque requête)
+_cached_proxies = None
+_proxies_initialized = False
 
 
 # =============================================================================
@@ -161,6 +187,11 @@ def calculate_backoff_delay(attempt: int) -> float:
     Le jitter est important en multi-thread pour éviter que tous les threads
     retryent exactement au même moment après une erreur serveur.
 
+    Les paramètres sont lus depuis la configuration globale (modifiable via CLI):
+        - config["initial_delay"]: délai initial (--initial-delay)
+        - config["backoff_multiplier"]: multiplicateur (--backoff-multiplier)
+        - config["max_delay"]: délai maximum (--max-delay)
+
     Args:
         attempt (int): Numéro de la tentative (0 pour la première, 1 pour la deuxième, etc.)
 
@@ -168,16 +199,21 @@ def calculate_backoff_delay(attempt: int) -> float:
         float: Délai en secondes avant le prochain retry.
 
     Example:
-        >>> calculate_backoff_delay(0)  # ~1.0s (±jitter)
-        >>> calculate_backoff_delay(1)  # ~2.0s (±jitter)
-        >>> calculate_backoff_delay(2)  # ~4.0s (±jitter)
-        >>> calculate_backoff_delay(10) # ~60.0s (plafonné)
+        >>> calculate_backoff_delay(0)  # ~0.2s (±jitter) avec config par défaut
+        >>> calculate_backoff_delay(1)  # ~0.3s (±jitter)
+        >>> calculate_backoff_delay(5)  # ~1.5s (±jitter)
+        >>> calculate_backoff_delay(15) # ~30.0s (plafonné)
     """
+    # Lecture des paramètres depuis la config (permet le tuning via CLI)
+    initial_delay = config.get("initial_delay", THROTTLE_INITIAL_DELAY)
+    multiplier = config.get("backoff_multiplier", THROTTLE_MULTIPLIER)
+    max_delay = config.get("max_delay", THROTTLE_MAX_DELAY)
+
     # Calcul du délai de base avec backoff exponentiel
-    base_delay = THROTTLE_INITIAL_DELAY * (THROTTLE_MULTIPLIER ** attempt)
+    base_delay = initial_delay * (multiplier ** attempt)
 
     # Plafonner au délai maximum
-    capped_delay = min(base_delay, THROTTLE_MAX_DELAY)
+    capped_delay = min(base_delay, max_delay)
 
     # Ajouter du jitter aléatoire (±THROTTLE_JITTER%)
     jitter_range = capped_delay * THROTTLE_JITTER
@@ -259,6 +295,41 @@ def get_proxies() -> dict | None:
         "http": proxy_url,
         "https": proxy_url,
     }
+
+
+def get_proxies_cached() -> dict | None:
+    """
+    Retourne la configuration proxy mise en cache.
+
+    Cette fonction calcule la configuration proxy une seule fois au premier
+    appel, puis retourne la valeur en cache pour les appels suivants.
+    Cela évite d'appeler os.getenv() pour chaque requête, améliorant
+    les performances lors du traitement en masse.
+
+    Returns:
+        dict | None: Configuration proxy mise en cache.
+
+    Note:
+        Le cache est réinitialisé si config["use_proxy"] change.
+        Utiliser invalidate_proxy_cache() pour forcer un recalcul.
+    """
+    global _cached_proxies, _proxies_initialized
+
+    if not _proxies_initialized:
+        _cached_proxies = get_proxies()
+        _proxies_initialized = True
+
+    return _cached_proxies
+
+
+def invalidate_proxy_cache() -> None:
+    """
+    Invalide le cache proxy pour forcer un recalcul au prochain appel.
+
+    Utile si les variables d'environnement ou config["use_proxy"] changent.
+    """
+    global _proxies_initialized
+    _proxies_initialized = False
 
 
 def sanitize_proxy_config(proxies: dict | None) -> str:
@@ -447,7 +518,7 @@ def hasValidVat(siren: str) -> dict:
     # Récupération des paramètres depuis la config globale
     max_attempts = config["max_retries"]
     timeout = config["timeout"]
-    proxies = get_proxies()
+    proxies = get_proxies_cached()
 
     # Construction de l'URL de l'API VIES
     # Format: https://ec.europa.eu/taxation_customs/vies/rest-api/ms/{COUNTRY}/vat/{VAT_NUMBER}
@@ -622,7 +693,7 @@ def processFile(infilename: str, outfilename: str, logfilename: str,
     """
     total = 0
     resultats = []
-    proxies = get_proxies()
+    proxies = get_proxies_cached()
 
     verbose_print(f"Configuration proxy: {sanitize_proxy_config(proxies)}")
 
@@ -784,6 +855,29 @@ def parse_args() -> argparse.Namespace:
         help=f"Nombre maximum de tentatives par SIREN (défaut: {DEFAULT_MAX_RETRIES})",
     )
 
+    # === Options de backoff (tuning avancé) ===
+    parser.add_argument(
+        "--initial-delay",
+        type=float,
+        default=THROTTLE_INITIAL_DELAY,
+        metavar="SEC",
+        help=f"Délai initial pour le backoff en secondes (défaut: {THROTTLE_INITIAL_DELAY})",
+    )
+    parser.add_argument(
+        "--backoff-multiplier",
+        type=float,
+        default=THROTTLE_MULTIPLIER,
+        metavar="N",
+        help=f"Multiplicateur de backoff exponentiel (défaut: {THROTTLE_MULTIPLIER})",
+    )
+    parser.add_argument(
+        "--max-delay",
+        type=float,
+        default=THROTTLE_MAX_DELAY,
+        metavar="SEC",
+        help=f"Délai maximum pour le backoff en secondes (défaut: {THROTTLE_MAX_DELAY})",
+    )
+
     return parser.parse_args()
 
 
@@ -814,6 +908,10 @@ def main() -> None:
     config["timeout"] = args.timeout
     config["max_retries"] = args.max_retries
     config["rate_limit"] = args.rate_limit
+    # Configuration du backoff
+    config["initial_delay"] = args.initial_delay
+    config["backoff_multiplier"] = args.backoff_multiplier
+    config["max_delay"] = args.max_delay
 
     # Initialisation du rate limiter avec la limite configurée
     rate_limiter = RateLimiter(args.rate_limit)
