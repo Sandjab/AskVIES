@@ -1,4 +1,4 @@
-# VIES - Validation de TVA Intracommunautaire
+# AskVIES - Validation de TVA Intracommunautaire
 
 Outil Python pour la validation en masse de numéros SIREN français contre l'API VIES (VAT Information Exchange System) de l'Union Européenne.
 
@@ -30,7 +30,7 @@ Ce projet permet de vérifier si des entreprises françaises, identifiées par l
 ```bash
 # Cloner le dépôt
 git clone <repository-url>
-cd VIES
+cd AskVIES
 
 # Installer les dépendances
 pip install -r requirements.txt
@@ -130,7 +130,7 @@ Utilisez `--no-proxy` pour désactiver le proxy même si les variables sont déf
 ## Architecture
 
 ```
-VIES/
+AskVIES/
 ├── vies.py          # Script principal
 ├── sirens.txt       # Fichier d'entrée exemple
 ├── requirements.txt # Dépendances Python
