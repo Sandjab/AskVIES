@@ -52,7 +52,7 @@ import requests
 
 # Valeurs par défaut pour les options CLI
 DEFAULT_WORKERS = 10          # Nombre de threads concurrents
-DEFAULT_RATE_LIMIT = 25       # Requêtes par minute maximum
+DEFAULT_RATE_LIMIT = 120      # Requêtes par minute maximum
 DEFAULT_TIMEOUT = 90          # Timeout HTTP en secondes
 DEFAULT_MAX_RETRIES = 50      # Nombre max de tentatives par SIREN
 DEFAULT_LOG_FILE = "default.log"  # Fichier de log par défaut
@@ -109,11 +109,11 @@ class RateLimiter:
 
         Args:
             calls_per_minute (int): Nombre maximum de requêtes autorisées par minute.
-                                   Doit être > 0. Exemple: 25 signifie max 25 req/min,
-                                   soit un intervalle minimum de 2.4 secondes entre appels.
+                                   Doit être > 0. Exemple: 120 signifie max 120 req/min,
+                                   soit un intervalle minimum de 0.5 secondes entre appels.
         """
         self.calls_per_minute = calls_per_minute
-        self.min_interval = 60.0 / calls_per_minute  # Ex: 60/25 = 2.4 secondes
+        self.min_interval = 60.0 / calls_per_minute  # Ex: 60/120 = 0.5 secondes
         self.last_call = 0.0  # Timestamp du dernier appel (0 = jamais appelé)
         self.lock = threading.Lock()  # Verrou pour thread-safety
 

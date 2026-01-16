@@ -25,28 +25,28 @@ VIES/
 
 ### Organisation du code
 
-1. **Imports et configuration** (lignes 1-70)
+1. **Imports et configuration** (lignes 1-75)
    - Constantes par défaut : `DEFAULT_WORKERS`, `DEFAULT_TIMEOUT`, etc.
    - Configuration globale via dictionnaire `config`
    - Classe `RateLimiter` : limitation thread-safe des requêtes/minute
    - `_rate_limited_request()` : wrapper HTTP avec rate limiting
 
-2. **Fonctions utilitaires** (lignes 73-101)
+2. **Fonctions utilitaires** (lignes 222-358)
    - `get_proxies()` : Configuration proxy dynamique
    - `log()` : Journalisation avec horodatage
    - `out()` : Écriture des résultats CSV
    - `verbose_print()` : Affichage conditionnel en mode verbose
 
-3. **Logique métier** (lignes 104-210)
+3. **Logique métier** (lignes 365-539)
    - `computeVAT()` : Conversion SIREN → TVA
    - `hasValidVat()` : Validation contre l'API (avec rate limiting)
    - `processID()` : Wrapper de traitement
 
-4. **Modes d'exécution** (lignes 213-316)
+4. **Modes d'exécution** (lignes 546-681)
    - `dry_run()` : Mode simulation sans appel API
    - `processFile()` : Traitement en masse multi-thread
 
-5. **Interface CLI** (lignes 319-456)
+5. **Interface CLI** (lignes 688-845)
    - `parse_args()` : Configuration argparse
    - `main()` : Point d'entrée principal (initialise le rate limiter)
 
@@ -83,7 +83,7 @@ python vies.py sirens.txt --no-proxy
 | `FILE` | (requis) | Fichier d'entrée |
 | `-o, --output` | `<input>.out` | Fichier de sortie |
 | `-w, --workers` | 10 | Threads concurrents |
-| `-r, --rate-limit` | 25 | Requêtes/minute |
+| `-r, --rate-limit` | 120 | Requêtes/minute |
 | `--log` | `default.log` | Fichier de log |
 | `--dry-run` | - | Mode simulation |
 | `-v, --verbose` | - | Mode verbeux |

@@ -11,7 +11,7 @@ Ce projet permet de vérifier si des entreprises françaises, identifiées par l
 - **Conversion SIREN → TVA** : Calcul automatique du numéro de TVA intracommunautaire français à partir d'un SIREN
 - **Validation en masse** : Traitement parallèle de fichiers contenant plusieurs numéros SIREN
 - **Gestion robuste des erreurs** : Mécanisme de retry avec backoff exponentiel
-- **Rate limiting** : Limitation configurable des requêtes par minute (défaut: 25 req/min)
+- **Rate limiting** : Limitation configurable des requêtes par minute (défaut: 120 req/min)
 - **Interface CLI complète** : Options configurables via ligne de commande
 - **Mode dry-run** : Vérification des TVA calculés sans appeler l'API
 - **Support proxy** : Configuration proxy pour environnements d'entreprise
@@ -65,7 +65,7 @@ options:
   -o FILE, --output FILE
                         Fichier de sortie CSV (défaut: <input>.out)
   -w N, --workers N     Nombre de threads concurrents (défaut: 10)
-  -r N, --rate-limit N  Limite de requêtes par minute (défaut: 25)
+  -r N, --rate-limit N  Limite de requêtes par minute (défaut: 120)
   --log FILE            Fichier de log (défaut: default.log)
   --dry-run             Affiche les TVA calculés sans appeler l'API
   -v, --verbose         Mode verbeux (affiche plus de détails)
@@ -157,7 +157,7 @@ Exemple : SIREN `380129866` → TVA `FR38380129866`
 
 ## API utilisée
 
-- **Endpoint** : `http://ec.europa.eu/taxation_customs/vies/rest-api/ms/FR/vat/{TVA}`
+- **Endpoint** : `https://ec.europa.eu/taxation_customs/vies/rest-api/ms/FR/vat/{TVA}`
 - **Documentation** : [VIES VAT number validation](https://ec.europa.eu/taxation_customs/vies/)
 
 ## Auteur
