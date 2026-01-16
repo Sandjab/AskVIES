@@ -157,7 +157,7 @@ Exemple : SIREN `380129866` → TVA `FR38380129866`
 
 ## API utilisée
 
-- **Endpoint** : `http://ec.europa.eu/taxation_customs/vies/rest-api/ms/FR/vat/{TVA}`
+- **Endpoint** : `https://ec.europa.eu/taxation_customs/vies/rest-api/ms/FR/vat/{TVA}`
 - **Documentation** : [VIES VAT number validation](https://ec.europa.eu/taxation_customs/vies/)
 
 ## Auteur
