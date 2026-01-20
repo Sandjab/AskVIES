@@ -74,7 +74,11 @@ python vies.py sirens.txt --dry-run
 # Mode verbeux
 python vies.py sirens.txt -v
 
-# Sans proxy
+# Avec proxy explicite
+python vies.py sirens.txt --proxy http://proxy:8080
+python vies.py sirens.txt --proxy http://user:pass@proxy:8080
+
+# Sans proxy (connexion directe)
 python vies.py sirens.txt --no-proxy
 ```
 
@@ -90,12 +94,15 @@ python vies.py sirens.txt --no-proxy
 | `--dry-run` | - | Mode simulation |
 | `-v, --verbose` | - | Mode verbeux |
 | `-q, --quiet` | - | Mode silencieux |
-| `--no-proxy` | - | Désactive le proxy |
+| `--proxy` | - | URL du proxy (ex: http://user:pass@host:port) |
+| `--no-proxy` | - | Désactive le proxy (connexion directe) |
 | `--timeout` | 90 | Timeout HTTP (s) |
 | `--max-retries` | 50 | Tentatives max |
 | `--initial-delay` | 0.2 | Délai initial backoff (s) |
 | `--backoff-multiplier` | 1.5 | Multiplicateur backoff |
 | `--max-delay` | 30 | Délai max backoff (s) |
+
+> **Note** : `--proxy` et `--no-proxy` sont mutuellement exclusifs.
 
 ## Conventions de code
 
@@ -111,11 +118,20 @@ python vies.py sirens.txt --no-proxy
 - Le mécanisme de retry avec backoff exponentiel est essentiel
 - Respecter le rate limiting pour éviter les blocages
 
-### Variables d'environnement
-- `PROXY_USER` : Username proxy (optionnel)
-- `PROXY_PWD` : Password proxy (optionnel)
-- `PROXY_HOST` : Adresse proxy au format `<ip>:<port>` (optionnel)
-- Utiliser `--no-proxy` pour désactiver le proxy
+### Configuration du proxy
+
+Le proxy est configuré selon cet ordre de priorité :
+
+1. `--no-proxy` : Connexion directe (pas de proxy)
+2. `--proxy URL` : URL du proxy spécifiée explicitement
+3. `PROXY_HOST` (+ `PROXY_USER`/`PROXY_PWD` optionnels) : Configuration legacy
+4. Auto-détection : `HTTP_PROXY`/`HTTPS_PROXY` (variables système standard)
+
+**Variables d'environnement supportées :**
+- `PROXY_HOST` : Adresse proxy au format `<ip>:<port>` (legacy)
+- `PROXY_USER` : Username proxy (optionnel, avec PROXY_HOST)
+- `PROXY_PWD` : Password proxy (optionnel, avec PROXY_HOST)
+- `HTTP_PROXY` / `HTTPS_PROXY` : Variables système standard (auto-détection)
 
 ### Fichiers générés (non versionnés)
 - `default.log` : Journal des opérations
