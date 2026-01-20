@@ -69,7 +69,8 @@ THROTTLE_JITTER = 0.3         # Facteur de jitter (±30% du délai calculé)
 config = {
     "verbose": False,         # Affichage détaillé
     "quiet": False,           # Mode silencieux (pas de sortie console)
-    "use_proxy": True,        # Utilisation du proxy d'entreprise
+    "use_proxy": True,        # True = auto-détection, False = désactivé (--no-proxy)
+    "proxy_url": None,        # URL proxy explicite si spécifiée via --proxy
     "timeout": DEFAULT_TIMEOUT,
     "max_retries": DEFAULT_MAX_RETRIES,
     "rate_limit": DEFAULT_RATE_LIMIT,
@@ -223,7 +224,7 @@ def calculate_backoff_delay(attempt: int) -> float:
     return max(0.1, jittered_delay)
 
 
-def _rate_limited_request(url: str, proxies: dict, timeout: int) -> requests.Response:
+def _rate_limited_request(url: str, proxies: dict | None, timeout: int) -> requests.Response:
     """
     Effectue une requête HTTP GET avec rate limiting.
 
@@ -232,9 +233,10 @@ def _rate_limited_request(url: str, proxies: dict, timeout: int) -> requests.Res
 
     Args:
         url (str): URL complète de la requête API.
-        proxies (dict | None): Configuration proxy au format requests.
-                              Ex: {"http": "http://proxy:8080", "https": "..."}
-                              None si pas de proxy.
+        proxies (dict | None): Configuration proxy au format requests:
+            - None : connexion directe forcée (pas de proxy)
+            - {} : auto-détection (requests utilise HTTP_PROXY/HTTPS_PROXY)
+            - {"http": url, "https": url} : proxy explicite
         timeout (int): Timeout de la requête en secondes.
 
     Returns:
@@ -248,7 +250,16 @@ def _rate_limited_request(url: str, proxies: dict, timeout: int) -> requests.Res
     if rate_limiter:
         rate_limiter.wait()
 
-    return requests.get(url, proxies=proxies, timeout=timeout)
+    # Gestion des différents cas de configuration proxy
+    if proxies is None:
+        # Connexion directe forcée (--no-proxy)
+        return requests.get(url, proxies=None, timeout=timeout)
+    elif proxies:
+        # Proxy explicite (--proxy URL ou PROXY_HOST)
+        return requests.get(url, proxies=proxies, timeout=timeout)
+    else:
+        # Dict vide : laisser requests détecter HTTP_PROXY/HTTPS_PROXY
+        return requests.get(url, timeout=timeout)
 
 
 # =============================================================================
@@ -257,44 +268,61 @@ def _rate_limited_request(url: str, proxies: dict, timeout: int) -> requests.Res
 
 def get_proxies() -> dict | None:
     """
-    Construit la configuration proxy à partir des variables d'environnement.
+    Construit la configuration proxy selon l'ordre de priorité.
 
-    Le proxy est configuré via trois variables d'environnement:
-        - PROXY_USER: Nom d'utilisateur pour l'authentification proxy
-        - PROXY_PWD: Mot de passe pour l'authentification proxy
-        - PROXY_HOST: Adresse du serveur proxy au format <ip>:<port>
+    Ordre de priorité:
+        1. --no-proxy : retourne None (proxy désactivé, connexion directe)
+        2. --proxy URL : utilise l'URL spécifiée explicitement
+        3. PROXY_HOST (+ PROXY_USER/PWD optionnels) : configuration legacy
+        4. Retourne {} pour laisser requests détecter HTTP_PROXY/HTTPS_PROXY
 
     Returns:
-        dict | None: Dictionnaire de configuration proxy pour requests,
-                    ou None si le proxy est désactivé ou non configuré.
+        dict | None: Configuration proxy pour requests:
+            - None : proxy désactivé (connexion directe forcée)
+            - {} : auto-détection par requests (HTTP_PROXY, etc.)
+            - {"http": url, "https": url} : proxy explicite
 
     Example:
-        >>> os.environ["PROXY_USER"] = "user"
-        >>> os.environ["PROXY_PWD"] = "pass"
-        >>> os.environ["PROXY_HOST"] = "proxy.example.com:8080"
+        >>> # Avec --proxy http://proxy:8080
         >>> get_proxies()
-        {'http': 'http://user:pass@proxy.example.com:8080', 'https': '...'}
+        {'http': 'http://proxy:8080', 'https': 'http://proxy:8080'}
+
+        >>> # Avec --no-proxy
+        >>> get_proxies()
+        None
+
+        >>> # Sans option, avec PROXY_HOST=proxy:8080
+        >>> get_proxies()
+        {'http': 'http://proxy:8080', 'https': 'http://proxy:8080'}
+
+        >>> # Sans option ni variable d'environnement legacy
+        >>> get_proxies()
+        {}  # requests utilisera HTTP_PROXY/HTTPS_PROXY si définis
     """
-    # Vérifier si le proxy est activé dans la config
+    # Priorité 1: Proxy explicitement désactivé (--no-proxy)
     if not config["use_proxy"]:
         return None
 
-    # Récupérer les credentials et l'hôte depuis l'environnement
-    username = os.getenv("PROXY_USER")
-    password = os.getenv("PROXY_PWD")
+    # Priorité 2: URL proxy spécifiée via CLI (--proxy URL)
+    if config.get("proxy_url"):
+        url = config["proxy_url"]
+        return {"http": url, "https": url}
+
+    # Priorité 3: Variables d'environnement legacy (PROXY_HOST avec ou sans auth)
     proxy_host = os.getenv("PROXY_HOST")
+    if proxy_host:
+        username = os.getenv("PROXY_USER")
+        password = os.getenv("PROXY_PWD")
+        if username and password:
+            proxy_url = f"http://{username}:{password}@{proxy_host}"
+        else:
+            # Support des proxies sans authentification
+            proxy_url = f"http://{proxy_host}"
+        return {"http": proxy_url, "https": proxy_url}
 
-    # Si les paramètres ne sont pas définis, pas de proxy
-    if not username or not password or not proxy_host:
-        return None
-
-    # Construire l'URL du proxy avec authentification
-    proxy_url = f"http://{username}:{password}@{proxy_host}"
-
-    return {
-        "http": proxy_url,
-        "https": proxy_url,
-    }
+    # Priorité 4: Laisser requests utiliser HTTP_PROXY/HTTPS_PROXY automatiquement
+    # Retourner {} (dict vide) permet à requests de détecter les variables système
+    return {}
 
 
 def get_proxies_cached() -> dict | None:
@@ -340,19 +368,30 @@ def sanitize_proxy_config(proxies: dict | None) -> str:
     Le format retourné est: http://user:****@host:port
 
     Args:
-        proxies (dict | None): Configuration proxy au format requests,
-                               ou None si pas de proxy.
+        proxies (dict | None): Configuration proxy au format requests:
+            - None : proxy désactivé
+            - {} : auto-détection
+            - {"http": url, ...} : proxy explicite
 
     Returns:
-        str: Représentation sécurisée de la config proxy, ou "None" si désactivé.
+        str: Représentation sécurisée de la config proxy.
 
     Example:
         >>> proxies = {"http": "http://user:secret@proxy:8080", ...}
         >>> sanitize_proxy_config(proxies)
         'http://user:****@proxy:8080'
+
+        >>> sanitize_proxy_config(None)
+        'désactivé (connexion directe)'
+
+        >>> sanitize_proxy_config({})
+        'auto-détection'
     """
     if proxies is None:
-        return "None (proxy désactivé)"
+        return "désactivé (connexion directe)"
+
+    if not proxies:
+        return "auto-détection"
 
     # Extraire l'URL HTTP pour l'affichage
     proxy_url = proxies.get("http", "")
@@ -361,6 +400,39 @@ def sanitize_proxy_config(proxies: dict | None) -> str:
     sanitized = re.sub(r'://([^:]+):([^@]+)@', r'://\1:****@', proxy_url)
 
     return sanitized
+
+
+def _print_proxy_status() -> None:
+    """
+    Affiche la configuration proxy active au démarrage.
+
+    Cette fonction est appelée au début du traitement pour informer l'utilisateur
+    de la configuration proxy qui sera utilisée. Elle détecte également les
+    variables d'environnement système (HTTP_PROXY, etc.) en mode auto-détection.
+    """
+    proxies = get_proxies()
+
+    if proxies is None:
+        # --no-proxy utilisé
+        print("[CONFIG] Proxy: désactivé (connexion directe)")
+    elif not proxies:
+        # Auto-détection : vérifier si des variables système existent
+        env_proxy = (
+            os.getenv("HTTP_PROXY")
+            or os.getenv("HTTPS_PROXY")
+            or os.getenv("http_proxy")
+            or os.getenv("https_proxy")
+        )
+        if env_proxy:
+            # Masquer le mot de passe si présent dans la variable
+            sanitized = re.sub(r'://([^:]+):([^@]+)@', r'://\1:****@', env_proxy)
+            print(f"[CONFIG] Proxy: auto-détection ({sanitized})")
+        else:
+            print("[CONFIG] Proxy: aucun (connexion directe)")
+    else:
+        # Proxy explicite (--proxy ou PROXY_HOST)
+        source = "via --proxy" if config.get("proxy_url") else "via PROXY_HOST"
+        print(f"[CONFIG] Proxy: {sanitize_proxy_config(proxies)} ({source})")
 
 
 def log(message: str, filename: str = DEFAULT_LOG_FILE) -> None:
@@ -833,10 +905,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Mode silencieux (pas de sortie console)",
     )
-    parser.add_argument(
+
+    # === Options de proxy (mutuellement exclusives) ===
+    proxy_group = parser.add_mutually_exclusive_group()
+    proxy_group.add_argument(
+        "--proxy",
+        metavar="URL",
+        help="URL du proxy (ex: http://user:pass@host:port ou http://host:port)",
+    )
+    proxy_group.add_argument(
         "--no-proxy",
         action="store_true",
-        help="Désactive le proxy",
+        help="Désactive le proxy (connexion directe)",
     )
 
     # === Options avancées ===
@@ -905,6 +985,7 @@ def main() -> None:
     config["verbose"] = args.verbose
     config["quiet"] = args.quiet
     config["use_proxy"] = not args.no_proxy
+    config["proxy_url"] = args.proxy  # URL proxy explicite (--proxy)
     config["timeout"] = args.timeout
     config["max_retries"] = args.max_retries
     config["rate_limit"] = args.rate_limit
@@ -913,9 +994,16 @@ def main() -> None:
     config["backoff_multiplier"] = args.backoff_multiplier
     config["max_delay"] = args.max_delay
 
+    # Invalider le cache proxy pour prendre en compte la nouvelle config
+    invalidate_proxy_cache()
+
     # Initialisation du rate limiter avec la limite configurée
     rate_limiter = RateLimiter(args.rate_limit)
     verbose_print(f"Rate limiter configuré: {args.rate_limit} requêtes/minute")
+
+    # Afficher la configuration proxy (sauf en mode quiet ou dry-run)
+    if not args.quiet and not args.dry_run:
+        _print_proxy_status()
 
     # Détermination du fichier de sortie
     outfile = args.output if args.output else f"{args.file}.out"

@@ -54,7 +54,7 @@ python vies.py sirens.txt
 
 ```
 usage: vies [-h] [-o FILE] [-w N] [-r N] [--log FILE] [--dry-run] [-v] [-q]
-            [--no-proxy] [--timeout N] [--max-retries N]
+            [--proxy URL | --no-proxy] [--timeout N] [--max-retries N]
             [--initial-delay SEC] [--backoff-multiplier N] [--max-delay SEC]
             FILE
 
@@ -71,7 +71,8 @@ options:
   --dry-run             Affiche les TVA calculés sans appeler l'API
   -v, --verbose         Mode verbeux (affiche plus de détails)
   -q, --quiet           Mode silencieux (pas de sortie console)
-  --no-proxy            Désactive le proxy
+  --proxy URL           URL du proxy (ex: http://user:pass@host:port)
+  --no-proxy            Désactive le proxy (connexion directe)
   --timeout N           Timeout des requêtes HTTP en secondes (défaut: 90)
   --max-retries N       Nombre maximum de tentatives par SIREN (défaut: 50)
   --initial-delay SEC   Délai initial pour le backoff en secondes (défaut: 0.2)
@@ -79,6 +80,8 @@ options:
                         Multiplicateur de backoff exponentiel (défaut: 1.5)
   --max-delay SEC       Délai maximum pour le backoff en secondes (défaut: 30)
 ```
+
+> **Note** : `--proxy` et `--no-proxy` sont mutuellement exclusifs.
 
 ### Exemples
 
@@ -95,8 +98,12 @@ python vies.py sirens.txt --dry-run
 # Mode verbeux avec moins de workers
 python vies.py sirens.txt -v -w 5
 
-# Mode silencieux sans proxy
-python vies.py sirens.txt -q --no-proxy
+# Avec proxy explicite
+python vies.py sirens.txt --proxy http://proxy:8080
+python vies.py sirens.txt --proxy http://user:pass@proxy:8080
+
+# Sans proxy (connexion directe)
+python vies.py sirens.txt --no-proxy
 ```
 
 ### Sortie
@@ -113,19 +120,44 @@ siren;has_vat
 812117992;True
 ```
 
-## Configuration
+## Configuration du proxy
 
-### Variables d'environnement (optionnel - pour proxy)
+Le proxy est configuré selon cet ordre de priorité :
 
-Si vous êtes derrière un proxy d'entreprise, configurez les variables suivantes :
+1. `--no-proxy` : Connexion directe (pas de proxy)
+2. `--proxy URL` : URL du proxy spécifiée explicitement
+3. `PROXY_HOST` (+ `PROXY_USER`/`PROXY_PWD` optionnels) : Configuration legacy
+4. Auto-détection : `HTTP_PROXY`/`HTTPS_PROXY` (variables système standard)
+
+### Option 1 : Via ligne de commande (recommandé)
 
 ```bash
-export PROXY_USER="votre_username_proxy"
-export PROXY_PWD="votre_password_proxy"
-export PROXY_HOST="ip_proxy:port_proxy"  # ex: proxy.example.com:8080
+# Proxy sans authentification
+python vies.py sirens.txt --proxy http://proxy.example.com:8080
+
+# Proxy avec authentification
+python vies.py sirens.txt --proxy http://user:pass@proxy.example.com:8080
+
+# Forcer la connexion directe
+python vies.py sirens.txt --no-proxy
 ```
 
-Utilisez `--no-proxy` pour désactiver le proxy même si les variables sont définies.
+### Option 2 : Via variables d'environnement système
+
+Le script détecte automatiquement les variables standard :
+
+```bash
+export HTTP_PROXY="http://proxy.example.com:8080"
+export HTTPS_PROXY="http://proxy.example.com:8080"
+```
+
+### Option 3 : Via variables legacy (rétrocompatibilité)
+
+```bash
+export PROXY_HOST="proxy.example.com:8080"
+export PROXY_USER="votre_username"  # optionnel
+export PROXY_PWD="votre_password"   # optionnel
+```
 
 ## Architecture
 
