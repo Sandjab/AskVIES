@@ -147,9 +147,10 @@ Le proxy est configuré selon cet ordre de priorité :
 
 ## Dépendances
 
-| Package | Usage |
-|---------|-------|
-| `requests` | Requêtes HTTP vers l'API VIES |
+| Prérequis | Version | Raison |
+|-----------|---------|--------|
+| Python | 3.10+ | Syntaxe de type union (`dict | None`) |
+| `requests` | 2.28+ | Requêtes HTTP vers l'API VIES |
 
 ## Exécution de tests
 

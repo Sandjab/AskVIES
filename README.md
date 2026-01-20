@@ -19,7 +19,7 @@ Ce projet permet de vérifier si des entreprises françaises, identifiées par l
 
 ## Prérequis
 
-- Python 3.7+
+- Python 3.10+ (utilisation de la syntaxe de type union `X | Y`)
 - Dépendances Python :
   ```
   requests
