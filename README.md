@@ -120,6 +120,28 @@ siren;has_vat
 812117992;True
 ```
 
+### Indicateurs de progression
+
+Pendant le traitement, des caractères sont affichés pour indiquer l'état des requêtes :
+
+| Caractère | Signification |
+|-----------|---------------|
+| `.` | Retry - Erreur API temporaire (maintenance, surcharge) |
+| `P` | Proxy Error - Erreur de connexion au proxy |
+| `R` | Request Error - Erreur réseau (timeout, connexion refusée, etc.) |
+
+Ces indicateurs permettent de suivre visuellement les problèmes rencontrés pendant le traitement en masse. Chaque caractère correspond à une tentative de retry avec backoff exponentiel.
+
+**Exemple de sortie** :
+```
+Traitement de 100 SIRENs...
+..P.R...
+siren;has_vat
+931153688;True
+```
+
+> **Note** : En mode verbeux (`-v`), des messages détaillés sont affichés en plus de ces indicateurs. En mode silencieux (`-q`), aucun indicateur n'est affiché.
+
 ## Configuration du proxy
 
 Le proxy est configuré selon cet ordre de priorité :
