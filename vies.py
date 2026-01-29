@@ -586,6 +586,9 @@ def hasValidVat(siren: str) -> dict:
         - Le rate limiting est appliqué via _rate_limited_request()
         - Le throttling utilise calculate_backoff_delay() pour tous les types d'erreurs
         - Les paramètres de retry sont configurés via config[] et THROTTLE_*
+        - Les erreurs INVALID/INVALID_INPUT retournent None (pas de mauvaise catégorisation)
+        - Le champ isValid est priorisé sur valid (API VIES REST standard)
+        - Les types non-boolean sont convertis de façon sécurisée
     """
     # Récupération des paramètres depuis la config globale
     max_attempts = config["max_retries"]
@@ -610,10 +613,30 @@ def hasValidVat(siren: str) -> dict:
             # L'API peut retourner "error" ou "userError" selon le type d'erreur
             error = data.get("error", data.get("userError", None))
 
-            # Si erreur temporaire (ni VALID ni INVALID), retry avec backoff
-            if (error and error != "VALID" and error != "INVALID") or (
-                response.status_code != 200
-            ):
+            # Gestion des erreurs HTTP non-200
+            if response.status_code != 200:
+                delay = calculate_backoff_delay(attempt)
+                if not config["quiet"]:
+                    print(".", end="", flush=True)  # Indicateur de retry
+                verbose_print(
+                    f"Tentative {attempt + 1}/{max_attempts} - "
+                    f"HTTP {response.status_code} - Attente: {delay:.1f}s"
+                )
+                time.sleep(delay)
+                continue
+
+            # Si une erreur est présente dans la réponse JSON
+            if error:
+                # IMPORTANT: "INVALID" signifie que le format de la requête est invalide
+                # (pas que la TVA est invalide). On ne doit PAS extraire isValid dans ce cas
+                # car cela pourrait mener à une mauvaise catégorisation.
+                if error == "INVALID" or error == "INVALID_INPUT":
+                    verbose_print(f"Erreur de format pour {siren}: {error}")
+                    # Retourner None = échec, pas de catégorisation incorrecte
+                    return {"siren": siren, "has_vat": None}
+
+                # Autres erreurs temporaires (MS_UNAVAILABLE, SERVICE_UNAVAILABLE, etc.)
+                # → retry avec backoff
                 delay = calculate_backoff_delay(attempt)
                 if not config["quiet"]:
                     print(".", end="", flush=True)  # Indicateur de retry
@@ -625,11 +648,21 @@ def hasValidVat(siren: str) -> dict:
                 continue
 
             # Extraction du résultat de validation
-            # L'API peut retourner "valid" ou "isValid" selon la version
-            isValid = data.get("valid", data.get("isValid", None))
+            # L'API VIES REST utilise "isValid" comme champ principal
+            # On vérifie aussi "valid" pour compatibilité avec d'anciennes versions
+            isValid = data.get("isValid", data.get("valid", None))
+
+            # Validation du type: isValid doit être un boolean
+            if isValid is not None and not isinstance(isValid, bool):
+                verbose_print(f"Type inattendu pour isValid: {type(isValid).__name__} = {isValid}")
+                # Tenter une conversion sécurisée
+                if isinstance(isValid, str):
+                    isValid = isValid.lower() == "true"
+                else:
+                    isValid = bool(isValid)
 
             if isValid is None:
-                verbose_print(f"Réponse inattendue: {data}")
+                verbose_print(f"Réponse inattendue (pas de champ isValid): {data}")
 
             return {"siren": siren, "has_vat": isValid}
 
