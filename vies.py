@@ -586,9 +586,14 @@ def hasValidVat(siren: str) -> dict:
         - Le rate limiting est appliqué via _rate_limited_request()
         - Le throttling utilise calculate_backoff_delay() pour tous les types d'erreurs
         - Les paramètres de retry sont configurés via config[] et THROTTLE_*
-        - Les erreurs INVALID/INVALID_INPUT retournent None (pas de mauvaise catégorisation)
-        - Le champ isValid est priorisé sur valid (API VIES REST standard)
-        - Les types non-boolean sont convertis de façon sécurisée
+
+    Gestion des erreurs API VIES (codes userError officiels):
+        - INVALID_INPUT: retourne None (erreur de format, situation anormale)
+        - MS_UNAVAILABLE, SERVICE_UNAVAILABLE, TIMEOUT: retry avec backoff
+        - GLOBAL_MAX_CONCURRENT_REQ, MS_MAX_CONCURRENT_REQ: retry avec backoff
+
+    IMPORTANT: L'API VIES retourne isValid=false même en cas d'erreur technique.
+    On vérifie donc userError AVANT isValid pour éviter les faux négatifs.
     """
     # Récupération des paramètres depuis la config globale
     max_attempts = config["max_retries"]
@@ -625,18 +630,28 @@ def hasValidVat(siren: str) -> dict:
                 time.sleep(delay)
                 continue
 
-            # Si une erreur est présente dans la réponse JSON
+            # Si une erreur est présente dans la réponse JSON (champ userError)
+            # IMPORTANT: L'API VIES retourne isValid=false même en cas d'erreur technique!
+            # On doit donc vérifier userError AVANT d'extraire isValid pour éviter
+            # les faux négatifs (marquer une TVA comme invalide alors que c'est une erreur).
+            #
+            # Codes userError officiels (WSDL VIES):
+            # - INVALID_INPUT: CountryCode invalide ou TVA vide
+            # - GLOBAL_MAX_CONCURRENT_REQ: Trop de requêtes globales
+            # - MS_MAX_CONCURRENT_REQ: Trop de requêtes pour l'État membre
+            # - SERVICE_UNAVAILABLE: Erreur réseau/application web
+            # - MS_UNAVAILABLE: L'État membre ne répond pas
+            # - TIMEOUT: Pas de réponse dans le délai imparti
             if error:
-                # IMPORTANT: "INVALID" signifie que le format de la requête est invalide
-                # (pas que la TVA est invalide). On ne doit PAS extraire isValid dans ce cas
-                # car cela pourrait mener à une mauvaise catégorisation.
-                if error == "INVALID" or error == "INVALID_INPUT":
+                # INVALID_INPUT = erreur de format permanente
+                # Notre code génère toujours un format valide via computeVAT(),
+                # donc cette erreur indique une situation anormale → échec (None)
+                if error == "INVALID_INPUT":
                     verbose_print(f"Erreur de format pour {siren}: {error}")
                     # Retourner None = échec, pas de catégorisation incorrecte
                     return {"siren": siren, "has_vat": None}
 
-                # Autres erreurs temporaires (MS_UNAVAILABLE, SERVICE_UNAVAILABLE, etc.)
-                # → retry avec backoff
+                # Toutes les autres erreurs sont temporaires → retry avec backoff
                 delay = calculate_backoff_delay(attempt)
                 if not config["quiet"]:
                     print(".", end="", flush=True)  # Indicateur de retry
